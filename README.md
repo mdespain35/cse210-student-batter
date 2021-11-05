@@ -53,12 +53,8 @@ root                    (project root folder)
 
 ---
 
-<<<<<<< HEAD
-- Michael De Spain: mdespain35@gmail.com
-- Aiden Penman : pen20014@byui.edu
-=======
 - # TODO: Add your names and emails here
 
 * Michael De Spain: mdespain35@gmail.com
 * Sarah Osguthorpe: osg21001@byui.edu
->>>>>>> ebd6d7d0c07bac10619fdf46a9a558b5e644fc21
+* Aiden Penman: pen20014@byui.edu
