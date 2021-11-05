@@ -36,7 +36,18 @@ class MoveActorsAction(Action):
         y1 = position.get_y()
         x2 = velocity.get_x()
         y2 = velocity.get_y()
-        x = 1 + (x1 + x2 - 1) % (constants.MAX_X - 1)
-        y = 1 + (y1 + y2 - 1) % (constants.MAX_Y - 1)
+        x = x1 + x2 
+        y = y1 + y2 
+        if (x > constants.MAX_X or x <= 0):
+            actor.set_velocity(actor.get_velocity().reverse_x())
+        elif (y <= 0):
+            actor.set_velocity(actor.get_velocity().reverse_y())
+        elif(y > constants.MAX_Y):
+            exit()
+        
         position = Point(x, y)
         actor.set_position(position)
+
+
+
+        
