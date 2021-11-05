@@ -58,3 +58,4 @@ root                    (project root folder)
 * Michael De Spain: mdespain35@gmail.com
 * Sarah Osguthorpe: osg21001@byui.edu
 * Aiden Penman: pen20014@byui.edu
+* Jeremy Jackson: jac17053@byui.edu
