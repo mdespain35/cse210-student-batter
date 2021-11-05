@@ -42,3 +42,4 @@ root                    (project root folder)
 * # TODO: Add your names and emails here
 
 - Michael De Spain: mdespain35@gmail.com
+- Aiden Penman : pen20014@byui.edu
