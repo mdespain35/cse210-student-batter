@@ -40,8 +40,8 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.semgrep == true || inputs.semgrep == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install Semgrep
@@ -53,29 +53,20 @@ jobs:
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-semgrep-results
           path: semgrep.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"sast"}'
-          || true
   trivy:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.trivy == true || inputs.trivy == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run Trivy
         id: scan
         continue-on-error: true
@@ -86,30 +77,21 @@ jobs:
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-trivy-results
           path: trivy.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"sca"}'
-          || true
   checkov:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.checkov == true || inputs.checkov == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install Checkov
@@ -117,34 +99,25 @@ jobs:
       - name: Run Checkov
         id: scan
         continue-on-error: true
-        run: checkov -d . -o sarif --output-file-path console,checkov.sarif
+        run: checkov -d . -o sarif --output-file-path console,checkov.sarif --soft-fail
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: checkov.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-checkov-results
           path: checkov.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"iac"}'
-          || true
   bandit:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.bandit == true || inputs.bandit == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install Bandit
@@ -152,33 +125,24 @@ jobs:
       - name: Run Bandit
         id: scan
         continue-on-error: true
-        run: bandit -r . -f sarif -o bandit.sarif
+        run: bandit -r . -f sarif -o bandit.sarif || true
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: bandit.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-bandit-results
           path: bandit.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"sast"}'
-          || true
   snyk:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.snyk == true || inputs.snyk == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Snyk CLI
         run: npm install -g snyk
       - name: Run Snyk Open Source (SCA)
@@ -186,33 +150,24 @@ jobs:
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk test --sarif-file-output=snyk.sarif
+        run: snyk test --sarif-file-output=snyk.sarif || true
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-snyk-results
           path: snyk.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"sca"}'
-          || true
   snyk-code:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.snyk_code == true || inputs.snyk_code == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Snyk CLI
         run: npm install -g snyk
       - name: Run Snyk Code (SAST)
@@ -220,33 +175,24 @@ jobs:
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk code test --sarif-file-output=snyk-code.sarif
+        run: snyk code test --sarif-file-output=snyk-code.sarif || true
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-code.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-snyk_code-results
           path: snyk-code.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"sast"}'
-          || true
   snyk-iac:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.snyk_iac == true || inputs.snyk_iac == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Snyk CLI
         run: npm install -g snyk
       - name: Run Snyk IaC
@@ -254,25 +200,16 @@ jobs:
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk iac test --sarif-file-output=snyk-iac.sarif
+        run: snyk iac test --sarif-file-output=snyk-iac.sarif || true
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-iac.sarif
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: siegepal-snyk_iac-results
           path: snyk-iac.sarif
-      - name: Notify SiegePal
-        continue-on-error: true
-        env:
-          SIEGEPAL_CALLBACK_URL: "https://fkifoxniqz.a.pinggy.link/github/scan-callback/?token=9yZCE1o7luvFZzcTYQYtQ2fJa91HZitbR6gJEK3JnoQ"
-        run: >
-          curl -sS -X POST "$SIEGEPAL_CALLBACK_URL"
-          -H "Content-Type: application/json"
-          -d '{"repository":"mdespain35/cse210-student-batter","run_id":"${{ github.run_id }}","category":"iac"}'
-          || true
