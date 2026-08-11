@@ -62,6 +62,118 @@ jobs:
         with:
           name: siegepal-semgrep-results
           path: semgrep.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "semgrep.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Semgrep") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Semgrep',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Semgrep', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
@@ -95,6 +207,118 @@ jobs:
         with:
           name: siegepal-trivy-results
           path: trivy.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "trivy.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Trivy") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Trivy',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Trivy', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
@@ -130,6 +354,118 @@ jobs:
         with:
           name: siegepal-checkov-results
           path: checkov.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "checkov.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Checkov") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Checkov',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Checkov', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
@@ -165,6 +501,118 @@ jobs:
         with:
           name: siegepal-bandit-results
           path: bandit.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "bandit.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Bandit") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Bandit',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Bandit', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
@@ -199,6 +647,118 @@ jobs:
         with:
           name: siegepal-snyk-results
           path: snyk.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "snyk.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Snyk (SCA)") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Snyk (SCA)',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Snyk (SCA)', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
@@ -233,6 +793,118 @@ jobs:
         with:
           name: siegepal-snyk_code-results
           path: snyk-code.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "snyk-code.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Snyk Code") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Snyk Code',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Snyk Code', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
@@ -267,6 +939,118 @@ jobs:
         with:
           name: siegepal-snyk_iac-results
           path: snyk-iac.sarif
+      - name: SiegePal gate — evaluate findings
+        id: siegepal_gate
+        if: always()
+        env:
+          SIEGEPAL_GATE_SEVERITY: "low"
+          SIEGEPAL_SARIF_FILE: "snyk-iac.sarif"
+        run: |
+          python3 - <<'PYEOF'
+          import json, os
+          order = ["none", "low", "medium", "high", "critical"]
+          threshold = os.environ.get("SIEGEPAL_GATE_SEVERITY", "none").lower()
+          sarif_file = os.environ.get("SIEGEPAL_SARIF_FILE", "")
+          out = os.environ.get("GITHUB_OUTPUT")
+          def emit(**kw):
+              with open(out, "a") as fh:
+                  for k, v in kw.items():
+                      fh.write("%s=%s\n" % (k, v))
+          def sev_from_result(r, rules):
+              props = r.get("properties") or {}
+              sc = props.get("security-severity")
+              if sc is None:
+                  rid = r.get("ruleId")
+                  rule = rules.get(rid, {})
+                  sc = ((rule.get("properties") or {}).get("security-severity"))
+              if sc is not None:
+                  try:
+                      f = float(sc)
+                  except (TypeError, ValueError):
+                      f = -1
+                  if f >= 9.0: return 4
+                  if f >= 7.0: return 3
+                  if f >= 4.0: return 2
+                  if f > 0.0: return 1
+              level = (r.get("level") or "").lower()
+              return {"error": 3, "warning": 2, "note": 1, "none": 0}.get(level, 2)
+          # A parseable SARIF file is the authoritative 'the scanner ran'
+          # signal — most scanners exit non-zero when they FIND issues,
+          # so the tool's exit code must NOT gate this (that would flag
+          # every findings-present scan as an inconclusive crash).
+          if not os.path.exists(sarif_file):
+              # Missing output file is never "zero findings" (R5.5).
+              emit(conclusion="neutral", findings="0",
+                   summary="Tool did not produce an output file; result is inconclusive.")
+              raise SystemExit(0)
+          try:
+              with open(sarif_file) as fh:
+                  doc = json.load(fh)
+          except Exception as exc:
+              emit(conclusion="neutral", findings="0",
+                   summary="Could not parse scanner output: %s" % exc)
+              raise SystemExit(0)
+          t = order.index(threshold) if threshold in order else 0
+          count = 0
+          for run in (doc.get("runs") or []):
+              rules = {}
+              for rule in (((run.get("tool") or {}).get("driver") or {}).get("rules") or []):
+                  if rule.get("id"): rules[rule["id"]] = rule
+              for res in (run.get("results") or []):
+                  if sev_from_result(res, rules) >= t:
+                      count += 1
+          if count > 0:
+              emit(conclusion="failure", findings=str(count),
+                   summary="%d finding(s) at or above %s severity." % (count, threshold))
+          else:
+              emit(conclusion="success", findings="0",
+                   summary="No findings at or above %s severity." % threshold)
+          PYEOF
+      - name: SiegePal gate — report check run
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+          SIEGEPAL_CHECK_SUMMARY: "${{ steps.siegepal_gate.outputs.summary }}"
+          SIEGEPAL_HEAD_SHA: ""
+        with:
+          script: |
+            if (context.payload.pull_request && context.payload.pull_request.head.repo.fork) {
+              core.info("Fork PR: GITHUB_TOKEN is read-only, skipping check run creation.");
+              return;
+            }
+            const conclusion = process.env.SIEGEPAL_CHECK_CONCLUSION || "neutral";
+            const advisory = 'This result is advisory. To block merges, mark this check ("SiegePal / Snyk IaC") as a required status check in Settings → Branches → Branch protection rules.';
+            const summary = (process.env.SIEGEPAL_CHECK_SUMMARY || "") + "\n\n" + advisory;
+            const headSha = process.env.SIEGEPAL_HEAD_SHA || (context.payload.pull_request && context.payload.pull_request.head.sha) || context.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'SiegePal / Snyk IaC',
+              head_sha: headSha,
+              status: "completed",
+              conclusion: conclusion,
+              output: { title: 'SiegePal / Snyk IaC', summary: summary },
+            });
+      - name: SiegePal gate — enforce
+        if: always()
+        env:
+          SIEGEPAL_CHECK_CONCLUSION: "${{ steps.siegepal_gate.outputs.conclusion }}"
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "Fork PR: findings uploaded as artifacts; not failing the workflow."
+            exit 0
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "failure" ]; then
+            echo "SiegePal gate: blocking findings present."
+            exit 1
+          fi
+          if [ "$SIEGEPAL_CHECK_CONCLUSION" = "neutral" ]; then
+            echo "SiegePal gate: no conclusive output (nothing to scan or tool produced no report); not blocking."
+            exit 0
+          fi
+          echo "SiegePal gate: passed."
       - name: Notify SiegePal
         continue-on-error: true
         env:
